@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>Audio Experiments</title>
+  <style>
+    body { margin: 0; background: #fff; color: #000; font-family: sans-serif; }
+    .example { padding: 20px; border-bottom: 1px solid #ccc; }
+    .example h2 { margin: 0 0 10px; font-size: 18px; }
+    .container { display: flex; align-items: flex-start; }
+    .controls { display: flex; flex-direction: column; margin-right: 12px; }
+    button {
+      background: #eee; border: 1px solid #000; color: #000;
+      padding: 8px 16px; margin-bottom: 8px; cursor: pointer;
+      font-size: 16px; line-height: 1;
+    }
+    button:hover { background: #ddd; }
+    canvas {
+      border: 1px solid #000; background: #fff;
+      width: 400px; height: 40px; flex-shrink: 0; margin-right: 12px;
+      image-rendering: optimizeSpeed;
+      image-rendering: -moz-crisp-edges;
+      image-rendering: -o-crisp-edges;
+      image-rendering: -webkit-optimize-contrast;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+    .description {
+      max-width: 300px; font-size: 14px; line-height: 1.4;
+      border: 1px solid #000; background: #fafafa; padding: 8px;
+      min-height: 40px; color: #000;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Example 1 -->
+  <div class="example" id="ex1">
+    <h2>Example 1: Depth in Mono</h2>
+    <div class="container">
+      <div class="controls">
+        <button id="playPause1" disabled>▶</button>
+        <button id="toggle1" disabled>1</button>
+      </div>
+      <canvas id="viz1"></canvas>
+      <div class="description">Multiple mono tracks with varying contrast.</div>
+    </div>
+  </div>
+
+  <!-- Example 2 -->
+  <div class="example" id="ex2">
+    <h2>Example 2: The Power of Panning</h2>
+    <div class="container">
+      <div class="controls">
+        <button id="playPause2" disabled>▶</button>
+        <button id="toggle2" disabled>1</button>
+      </div>
+      <canvas id="viz2"></canvas>
+      <div class="description">Extreme L/R panning differences.</div>
+    </div>
+  </div>
+
+  <!-- Example 3 -->
+  <div class="example" id="ex3">
+    <h2>Example 3: Phase, A Double-Edged Sword</h2>
+    <div class="container">
+      <div class="controls">
+        <button id="playPause3" disabled>▶</button>
+        <button id="toggle3" disabled>1</button>
+      </div>
+      <canvas id="viz3"></canvas>
+      <div class="description">Phase-inverted vs in-phase signals.</div>
+    </div>
+  </div>
+
+  <!-- Example 4 -->
+  <div class="example" id="ex4">
+    <h2>Example 4: Balancing Width and Compatibility</h2>
+    <div class="container">
+      <div class="controls">
+        <button id="playPause4" disabled>▶</button>
+        <button id="toggle4" disabled>1</button>
+      </div>
+      <canvas id="viz4"></canvas>
+      <div class="description">Wide stereo vs mono-compatible mix.</div>
+    </div>
+  </div>
+
+  <!-- Example 5 -->
+  <div class="example" id="ex5">
+    <h2>Example 5: Crafting a Naturalistic Soundstage</h2>
+    <div class="container">
+      <div class="controls">
+        <button id="playPause5" disabled>▶</button>
+        <button id="toggle5" disabled>1</button>
+      </div>
+      <canvas id="viz5"></canvas>
+      <div class="description">Subtle panning for a realistic spatial mix.</div>
+    </div>
+  </div>
+
+  <script>
+    // — YOUR UNCHANGED FOLDER/FILE CONFIGURATION —
+    const exampleFiles = {
+      1: ['contrast.wav','lowcontrast.wav'],
+      2: ['1.wav','2.wav'],
+      3: ['haas_stereo.wav','haas_mono.wav','no_haas.wav'],
+      4: ['wider_stereo.wav','wider_mono.wav'],
+      5: ['nonnaturalism.wav','naturalism.wav']
+    };
+
+    function setupExample(index) {
+      const files = exampleFiles[index];
+      if (!files || !files.length) return;
+
+      // 1) Create AudioContext & nodes
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      const ctx = new AudioCtx();
+
+      const gains     = files.map(_ => { const g = ctx.createGain(); g.connect(ctx.destination); return g; });
+      const analysers = gains.map(g => { const a = ctx.createAnalyser(); a.fftSize = 128; a.connect(g); return a; });
+
+      // 2) Fetch & decode all audio buffers
+      const bufferPromises = files.map(name =>
+        fetch(`${index}/${name}`)
+          .then(r => r.arrayBuffer())
+          .then(buf => ctx.decodeAudioData(buf))
+      );
+
+      Promise.all(bufferPromises).then(buffers => {
+        let sources     = [];
+        let startTime   = 0;
+        let pauseOffset = 0;
+        let playing     = false;
+        let active      = 0;
+
+        const bufLen = analysers[0].frequencyBinCount;
+        const dataArr = analysers.map(_ => new Uint8Array(bufLen));
+
+        // draw loop (only visualizes the active track)
+        const canvas = document.getElementById(`viz${index}`);
+        const cctx   = canvas.getContext('2d');
+        canvas.width  = canvas.clientWidth;
+        canvas.height = canvas.clientHeight;
+        cctx.imageSmoothingEnabled = false;
+
+        function draw() {
+          requestAnimationFrame(draw);
+          cctx.fillStyle = '#fff';
+          cctx.fillRect(0, 0, canvas.width, canvas.height);
+          analysers[active].getByteFrequencyData(dataArr[active]);
+          const barW = Math.floor(canvas.width / bufLen), gap = 1;
+          let x = 0;
+          cctx.fillStyle = '#000';
+          for (let i = 0; i < bufLen; i++) {
+            const h = Math.floor(dataArr[active][i] / 255 * canvas.height);
+            cctx.fillRect(x, canvas.height - h, barW, h);
+            x += barW + gap;
+          }
+        }
+
+        // 3) Wire up buttons
+        const playBtn   = document.getElementById(`playPause${index}`);
+        const toggleBtn = document.getElementById(`toggle${index}`);
+
+        // enable Play once decoded
+        playBtn.disabled = false;
+
+        playBtn.addEventListener('click', () => {
+          if (ctx.state === 'suspended') ctx.resume();
+
+          if (!playing) {
+            // create fresh BufferSourceNodes
+            startTime = ctx.currentTime;
+            sources = buffers.map((buffer, i) => {
+              const src = ctx.createBufferSource();
+              src.buffer = buffer;
+              src.loop   = true;
+              src.connect(analysers[i]);
+              // start at correct offset
+              src.start(0, pauseOffset % buffer.duration);
+              return src;
+            });
+
+            // solo the active, mute others
+            gains.forEach((g, i) => g.gain.value = i === active ? 1 : 0);
+
+            playing = true;
+            playBtn.textContent = '⏸';
+            toggleBtn.disabled = false;
+            draw();
+          } else {
+            // pause: stop all & store offset
+            sources.forEach(src => src.stop());
+            pauseOffset += ctx.currentTime - startTime;
+            playing = false;
+            playBtn.textContent = '▶';
+          }
+        });
+
+        toggleBtn.addEventListener('click', () => {
+          active = (active + 1) % files.length;
+          toggleBtn.textContent = `${active + 1}`;
+          if (playing) {
+            gains.forEach((g, i) => g.gain.value = i === active ? 1 : 0);
+          }
+        });
+      });
+    }
+
+    // initialize all examples 1–5
+    Object.keys(exampleFiles).forEach(k => setupExample(Number(k)));
+  </script>
+</body>
+</html>
